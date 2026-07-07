@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patient Data Entry</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #eef2f7; padding: 20px; margin: 0; }
+        .container { max-width: 1200px; margin: auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        h2 { text-align: center; color: #2c3e50; margin-bottom: 30px; font-weight: 300; border-bottom: 2px solid #4F81BD; padding-bottom: 15px; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px 30px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group label { font-weight: 600; font-size: 14px; margin-bottom: 4px; color: #333; }
+        .form-group input, .form-group select { padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; transition: 0.2s; }
+        .form-group input:focus, .form-group select:focus { border-color: #4F81BD; outline: none; box-shadow: 0 0 0 3px rgba(79,129,189,0.2); }
+        .full-width { grid-column: 1 / -1; }
+        .btn { padding: 10px 20px; border: none; border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .btn-primary { background: #4F81BD; color: white; }
+        .btn-primary:hover { background: #3a6a9e; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-success:hover { background: #218838; }
+        .btn-warning { background: #ffc107; color: #212529; }
+        .btn-warning:hover { background: #e0a800; }
+        .btn-danger { background: #dc3545; color: white; }
+        .btn-danger:hover { background: #c82333; }
+        .btn-sm { padding: 5px 12px; font-size: 12px; }
+        .actions { margin-top: 20px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; justify-content: center; border-top: 1px solid #eee; padding-top: 20px; }
+        .actions select { padding: 8px 15px; border-radius: 6px; border: 1px solid #ccc; min-width: 200px; }
+        .table-wrapper { margin-top: 30px; overflow-x: auto; border-radius: 8px; border: 1px solid #ddd; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        table th { background: #fff; color: rgb(0, 0, 0); padding: 12px 8px; text-align: center; white-space: nowrap; }
+        table td { padding: 10px 8px; text-align: center; border-bottom: 1px solid #eee; vertical-align: middle; }
+        table tr:hover { background: #f5f8fc; }
+        .status-badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+        .action-btns { display: flex; gap: 5px; justify-content: center; flex-wrap: wrap; }
+        .empty-msg { text-align: center; color: #888; padding: 30px; }
+        .footer-msg { text-align: center; margin-top: 15px; font-size: 13px; color: #888; }
+        @media (max-width: 768px) { .form-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h2>📋 Patient List Entry</h2>
+
+    <!-- FORM -->
+    <form id="entryForm" action="/submit" method="post">
+        <input type="hidden" id="sr_no_hidden" name="sr_no_hidden" value="">
+
+        <div class="form-grid">
+            <!-- DATE -->
+            <div class="form-group">
+                <label for="date">DATE (Select)</label>
+                <input type="date" id="date" name="date" required value="{{ selected_date }}">
+            </div>
+            <!-- NAME -->
+            <div class="form-group">
+                <label for="name">NAME</label>
+                <input type="text" id="name" name="name" list="nameList" required autocomplete="off" placeholder="Enter name">
+                <datalist id="nameList">{% for n in names %}<option value="{{ n }}">{% endfor %}</datalist>
+            </div>
+            <!-- AGE -->
+            <div class="form-group">
+                <label for="age">AGE</label>
+                <input type="text" id="age" name="age" value="50y" required>
+            </div> 
+            <!-- CONSULTANT -->
+            <div class="form-group">
+                <label for="consultant">CONSULTANT NAME</label>
+                <input type="text" id="consultant" name="consultant" list="consultantList" required value="{{ default_consultant }}" autocomplete="off">
+                <datalist id="consultantList">{% for c in consultants %}<option value="{{ c }}">{% endfor %}</datalist>
+            </div>
+            <!-- PROCEDURE SELECTOR -->
+            <div class="form-group">
+                <label for="procedure_select">PROCEDURE SELECT</label>
+                <select id="procedure_select" onchange="updateProcedureTax()">
+                    <option value="0">0 - C/Angio (Tax: 1369)</option>
+                    <option value="1">1 - C/Angio + PCI (Tax: 11650)</option>
+                    <option value="2">2 - C/Angio + PCI (2 stents) (Tax: 17519)</option>
+                    <option value="3">3 - C/Angio + PCI (3 stents) (Tax: 20542)</option>
+                </select>
+            </div>
+            <!-- PROCEDURE (editable) -->
+            <div class="form-group">
+                <label for="procedure">PROCEDURE (editable)</label>
+                <input type="text" id="procedure" name="procedure" required value="C/Angio">
+            </div>
+
+            <!-- TOTAL COST -->
+            <div class="form-group">
+                <label for="total_cost">TOTAL COST</label>
+                <input type="number" id="total_cost" name="total_cost" step="0.01" required value="22908" oninput="calcTotalAfter()">
+            </div>
+
+            <!-- TAX -->
+            <div class="form-group">
+                <label for="tax">11% TAX Deduction</label>
+                <input type="number" id="tax" name="tax" step="0.01" required value="1369">
+            </div>
+             
+            <!-- TOTAL AFTER -->
+            <div class="form-group">
+                <label for="total_after">Total Cost After 11% TAX</label>
+                <input type="number" id="total_after" name="total_after" step="0.01" required value="21539">
+            </div>
+            <!-- DISPOSABLE -->
+            <div class="form-group">
+                <label for="disposable">DISPOSABLE</label>
+                <input type="text" id="disposable" name="disposable"  value="11500" list="disposableList" required autocomplete="off" placeholder="Enter disposable">
+                <datalist id="disposableList">{% for d in disposables %}<option value="{{ d }}">{% endfor %}</datalist>
+            </div>
+         
+            </br>
+        <div style="text-align: center; margin-top: 20px;">
+            <button type="submit" class="btn btn-primary" id="submitBtn">💾 Save Record</button>
+            <button type="button" class="btn btn-warning" onclick="resetForm()" style="margin-left:10px;">↺ Clear</button>
+        </div>
+        </br>
+            <hr>
+            <hr>
+            <hr>
+            <!-- MR#NO -->
+            <div class="form-group">
+                <label for="mr_no">MR#NO</label>
+                <input type="text" id="mr_no" name="mr_no" placeholder="Optional">
+            </div>
+            <!-- CATEGORY -->
+            <div class="form-group">
+                <label for="category">CATEGORY</label>
+                <input type="text" id="category" name="category" value="Healthcard" required>
+            </div> 
+            <!-- OTHER FIELDS -->
+            <div class="form-group"><label for="payment">PAYMENT</label><input type="text" id="payment" name="payment"></div>
+            <div class="form-group"><label for="received">RECEIVED</label><input type="text" id="received" name="received"></div>
+            <div class="form-group"><label for="cath_share">CATH SHARE</label><input type="text" id="cath_share" name="cath_share"></div>
+            <div class="form-group"><label for="doc_share">DOC SHARE</label><input type="text" id="doc_share" name="doc_share"></div>
+            <div class="form-group"><label for="ssp_claim">SSP CLAIM</label><input type="text" id="ssp_claim" name="ssp_claim"></div>
+            <div class="form-group"><label for="status">Status</label><input type="text" id="status" name="status"></div>
+            <div class="form-group"><label for="scan_done">Scan Done/Upload</label><input type="text" id="scan_done" name="scan_done"></div>
+        </div>
+
+        <div style="text-align: center; margin-top: 20px;">
+            <button type="submit" class="btn btn-primary" id="submitBtn">💾 Save Record</button>
+            <button type="button" class="btn btn-warning" onclick="resetForm()" style="margin-left:10px;">↺ Clear</button>
+        </div>
+    </form>
+
+    <!-- ACTIONS (Download / Arrange Dropdown) -->
+    <div class="actions">
+        <select id="fileSelect">
+            <option value="">-- Select File --</option>
+        </select>
+        <button class="btn btn-success" onclick="downloadFile()">⬇ Download</button>
+        <button class="btn btn-warning" onclick="arrangeFile()">🔄 Arrange</button>
+        <button class="btn btn-danger" onclick="deleteFile()">🗑 Delete File</button>
+    </div>
+
+    <!-- DATA PREVIEW TABLE -->
+    <div class="table-wrapper">
+        <table>
+            <thead id="tableHead">
+                <tr>
+                    <th>Sr.No</th><th>DATE</th><th>NAME</th><th>AGE</th><th>CATEGORY</th>
+                    <th>MR#NO</th><th>CONSULTANT</th><th>PROCEDURE</th><th>TOTAL</th>
+                    <th>TAX</th><th>AFTER TAX</th><th>DISPOSABLE</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+                <tr><td colspan="13" class="empty-msg">Loading data...</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="footer-msg">Click <b>Edit</b> to modify a record, <b>Delete</b> to remove it. The date field stays persistent after saving.</div>
+</div>
+
+<script>
+    // ====== PROCEDURE MAP ======
+    const procMap = {
+        "0": { proc: "C/Angio", tax: 1369 },
+        "1": { proc: "C/Angio + PCI", tax: 11650 },
+        "2": { proc: "C/Angio + PCI", tax: 17519 },
+        "3": { proc: "C/Angio + PCI", tax: 20542 }
+    };
+
+    function updateProcedureTax() {
+        const sel = document.getElementById('procedure_select');
+        const val = sel.value;
+        const data = procMap[val];
+        if (data) {
+            document.getElementById('procedure').value = data.proc;
+            document.getElementById('tax').value = data.tax;
+            calcTotalAfter();
+        }
+    }
+
+    function calcTotalAfter() {
+        const totalCost = parseFloat(document.getElementById('total_cost').value) || 0;
+        const tax = parseFloat(document.getElementById('tax').value) || 0;
+        document.getElementById('total_after').value = (totalCost - tax).toFixed(2);
+    }
+
+    function resetForm() {
+        document.getElementById('entryForm').reset();
+        document.getElementById('sr_no_hidden').value = '';
+        document.getElementById('submitBtn').textContent = '💾 Save Record';
+        document.getElementById('procedure_select').value = '0';
+        updateProcedureTax();
+    }
+
+    // ====== LOAD FILES DROPDOWN ======
+    async function loadFiles() {
+        const res = await fetch('/files');
+        const files = await res.json();
+        const select = document.getElementById('fileSelect');
+        select.innerHTML = '<option value="">-- Select File --</option>';
+        files.forEach(f => {
+            const opt = document.createElement('option');
+            opt.value = f.month_year;
+            opt.textContent = f.month_year;
+            select.appendChild(opt);
+        });
+        // Auto-select current month based on date input
+        const dateInput = document.getElementById('date');
+        if (dateInput.value) {
+            const parts = dateInput.value.split('-');
+            const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+            const month = monthNames[parseInt(parts[1]) - 1];
+            const year = parts[0];
+            const currentMonth = `${month} ${year}`;
+            for (let opt of select.options) {
+                if (opt.value === currentMonth) {
+                    opt.selected = true;
+                    break;
+                }
+            }
+        }
+        loadPreview();
+    }
+
+    // ====== LOAD PREVIEW ======
+    async function loadPreview() {
+        const select = document.getElementById('fileSelect');
+        const monthYear = select.value;
+        if (!monthYear) {
+            document.getElementById('tableBody').innerHTML = '<tr><td colspan="13" class="empty-msg">Please select a file.</td></tr>';
+            return;
+        }
+        const res = await fetch(`/preview?month_year=${encodeURIComponent(monthYear)}`);
+        const data = await res.json();
+        const tbody = document.getElementById('tableBody');
+        if (data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="13" class="empty-msg">No records found in this file.</td></tr>';
+            return;
+        }
+        let html = '';
+        data.forEach(row => {
+            // row indices: 0=Sr, 1=DATE, 2=NAME, 3=AGE, 4=CAT, 5=MR, 6=DOC, 7=PROC, 8=TOTAL, 9=TAX, 10=AFTER, 11=PAYMENT, 12=RECEIVED, 13=DISPOSABLE, ...
+            const sr = row[0] || '';
+            const date = row[1] || '';
+            const name = row[2] || '';
+            const age = row[3] || '';
+            const cat = row[4] || '';
+            const mr = row[5] || '';
+            const doc = row[6] || '';
+            const proc = row[7] || '';
+            const total = row[8] || '';
+            const tax = row[9] || '';
+            const after = row[10] || '';
+            const disposable = row[13] || '';
+            html += `<tr>
+                <td><strong>${sr}</strong></td>
+                <td>${date}</td>
+                <td>${name}</td>
+                <td>${age}</td>
+                <td>${cat}</td>
+                <td>${mr}</td>
+                <td>${doc}</td>
+                <td>${proc}</td>
+                <td>${total}</td>
+                <td>${tax}</td>
+                <td>${after}</td>
+                <td>${disposable}</td>
+                <td class="action-btns">
+                    <button class="btn btn-warning btn-sm" onclick="editRow(${sr})">✎ Edit</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteRow(${sr})">✕ Del</button>
+                </td>
+            </tr>`;
+        });
+        tbody.innerHTML = html;
+    }
+
+    // ====== EDIT ROW ======
+    function editRow(srNo) {
+        const select = document.getElementById('fileSelect');
+        const monthYear = select.value;
+        if (!monthYear) return alert('Please select a file first.');
+        
+        fetch(`/preview?month_year=${encodeURIComponent(monthYear)}`)
+            .then(res => res.json())
+            .then(data => {
+                const row = data.find(r => r[0] === srNo);
+                if (!row) return alert('Record not found!');
+                // Fill form
+                document.getElementById('sr_no_hidden').value = srNo;
+                document.getElementById('name').value = row[2] || '';
+                document.getElementById('age').value = row[3] || '';
+                document.getElementById('category').value = row[4] || '';
+                document.getElementById('mr_no').value = row[5] || '';
+                document.getElementById('consultant').value = row[6] || '';
+                document.getElementById('procedure').value = row[7] || '';
+                document.getElementById('total_cost').value = row[8] || '';
+                document.getElementById('tax').value = row[9] || '';
+                document.getElementById('total_after').value = row[10] || '';
+                document.getElementById('payment').value = row[11] || '';
+                document.getElementById('received').value = row[12] || '';
+                document.getElementById('disposable').value = row[13] || '';
+                document.getElementById('cath_share').value = row[14] || '';
+                document.getElementById('doc_share').value = row[15] || '';
+                document.getElementById('ssp_claim').value = row[16] || '';
+                document.getElementById('status').value = row[17] || '';
+                document.getElementById('scan_done').value = row[18] || '';
+                // Set date (convert DD/MM/YYYY to YYYY-MM-DD for input)
+                const dateStr = row[1];
+                if (dateStr) {
+                    const parts = dateStr.split('/');
+                    if (parts.length === 3) {
+                        const formatted = `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
+                        document.getElementById('date').value = formatted;
+                    }
+                }
+                document.getElementById('submitBtn').textContent = '✏️ Update Record';
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+    }
+
+    // ====== DELETE ROW ======
+    function deleteRow(srNo) {
+        const select = document.getElementById('fileSelect');
+        const monthYear = select.value;
+        if (!monthYear) return alert('Please select a file first.');
+        if (!confirm(`Are you sure you want to delete Sr. No ${srNo}?`)) return;
+        
+        const formData = new FormData();
+        formData.append('month_year', monthYear);
+        formData.append('sr_no', srNo);
+        
+        fetch('/delete', {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                alert('Record deleted successfully!');
+                loadPreview();
+                loadFiles();
+            } else {
+                alert('Failed to delete record.');
+            }
+        });
+    }
+
+    // ====== DOWNLOAD FILE ======
+    function downloadFile() {
+        const select = document.getElementById('fileSelect');
+        const monthYear = select.value;
+        if (!monthYear) return alert('Please select a file first.');
+        window.open(`/download?month_year=${encodeURIComponent(monthYear)}`, '_blank');
+    }
+
+    // ====== ARRANGE FILE ======
+    function arrangeFile() {
+        const select = document.getElementById('fileSelect');
+        const monthYear = select.value;
+        if (!monthYear) return alert('Please select a file first.');
+        if (!confirm(`Arrange file "${monthYear}" by Date and Procedure?`)) return;
+        fetch(`/arrange?month_year=${encodeURIComponent(monthYear)}`)
+            .then(res => res.json())
+            .then(data => {
+                alert(data.message || 'File arranged successfully!');
+                loadPreview();
+                loadFiles();
+            });
+    }
+
+    // ====== DELETE FILE ======
+    function deleteFile() {
+        const select = document.getElementById('fileSelect');
+        const monthYear = select.value;
+        if (!monthYear) return alert('Please select a file first.');
+        if (!confirm(`Are you sure you want to DELETE the entire file "${monthYear}"? This cannot be undone!`)) return;
+        // Delete via backend (we don't have direct delete endpoint, let's add one quickly via fetch)
+        fetch(`/delete-file?month_year=${encodeURIComponent(monthYear)}`, { method: 'DELETE' })
+            .then(res => res.json())
+            .then(data => {
+                alert(data.message || 'File deleted.');
+                loadFiles();
+                loadPreview();
+            })
+            .catch(() => alert('Error deleting file.'));
+    }
+
+    // ====== ADD DELETE-FILE ENDPOINT (temporary, we'll handle in backend but we can just call it) ======
+    // Wait, we need to add this endpoint in main.py. I'll include it in the final code.
+    // But for now, let's just implement it.
+
+    // ====== AUTO LOAD ON PAGE LOAD ======
+    window.onload = function() {
+        loadFiles();
+        // Ensure date is set from backend
+        const dateInput = document.getElementById('date');
+        // If server passed selected_date, it's already set.
+        // Auto-select procedure from dropdown
+        updateProcedureTax();
+    };
+
+    // Listen to file select change to refresh preview
+    document.getElementById('fileSelect').addEventListener('change', loadPreview);
+</script>
+</body>
+</html>

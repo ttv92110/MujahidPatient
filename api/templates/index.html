@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Patient Entry</title></head>
+<body>
+<h2>Patient Data Entry</h2>
+<form action="/submit" method="post">
+    <label>Date: <input type="date" name="date" required></label><br>
+    <label>Name: <input type="text" name="name" required></label><br>
+    <label>Age: <input type="text" name="age" value="50y"></label><br>
+    <label>Category: <input type="text" name="category" value="Healthcard"></label><br>
+    <label>MR#NO: <input type="text" name="mr_no"></label><br>
+    <label>Consultant: <input type="text" name="consultant" value="Dr. Anjum Rana"></label><br>
+    <label>Procedure: <input type="text" name="procedure" required></label><br>
+    <label>Tax: <input type="number" name="tax" step="0.01" required></label><br>
+    <label>Total Cost: <input type="number" name="total_cost" step="0.01" required></label><br>
+    <label>Total After Tax: <input type="number" name="total_after" step="0.01" required></label><br>
+    <label>Disposable: <input type="text" name="disposable" required></label><br>
+    <label>Payment: <input type="text" name="payment"></label><br>
+    <label>Received: <input type="text" name="received"></label><br>
+    <label>Cath Share: <input type="text" name="cath_share"></label><br>
+    <label>Doc Share: <input type="text" name="doc_share"></label><br>
+    <label>SSP Claim: <input type="text" name="ssp_claim"></label><br>
+    <label>Status: <input type="text" name="status"></label><br>
+    <label>Scan Done: <input type="text" name="scan_done"></label><br>
+    <button type="submit">Save</button>
+</form>
+</body>
+</html>

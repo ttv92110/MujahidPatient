@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/main.py",
+      "use": "@vercel/python"
+    },
+    {
+      "src": "static/**",
+      "use": "@vercel/static",
+      "config": {
+        "maxLambdaSize": "15mb"
+      }
+    } 
+  ],
+  "routes": [
+    {
+      "src": "/static/(.*)",
+      "dest": "/static/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/main.py"
+    }
+  ],
+  "env": {
+    "USE_GOOGLE_SHEETS": "True"
+  }
+}

@@ -375,12 +375,21 @@
         const monthYear = select.value;
         if (!monthYear) return alert('Please select a file first.');
         if (!confirm(`Arrange file "${monthYear}" by Date and Procedure?`)) return;
+        
         fetch(`/arrange?month_year=${encodeURIComponent(monthYear)}`)
-            .then(res => res.json())
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.error || 'Unknown error'); });
+                }
+                return response.json();
+            })
             .then(data => {
                 alert(data.message || 'File arranged successfully!');
                 loadPreview();
                 loadFiles();
+            })
+            .catch(error => {
+                alert('Error arranging file: ' + error.message);
             });
     }
 

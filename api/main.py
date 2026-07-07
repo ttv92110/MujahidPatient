@@ -7,6 +7,7 @@ from datetime import datetime
 import json
 import shutil
 import os
+import traceback
 from typing import Optional
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, Border, Side
@@ -24,7 +25,6 @@ else:
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
 
-# ڈائریکٹریز بنائیں (صرف مقامی یا /tmp پر)
 DATA_DIR.mkdir(exist_ok=True)
 TEMPLATES_DIR.mkdir(exist_ok=True)
 STATIC_DIR.mkdir(exist_ok=True)
@@ -49,12 +49,11 @@ if not INDEX_HTML.exists():
     print(f"✅ Default index.html created at {INDEX_HTML}")
 
 # ============================================================
-# SUGGESTIONS (اب فائل سے نہیں، براہ راست Excel سے)
+# SUGGESTIONS (میموری میں)
 # ============================================================
 def build_suggestions():
-    """تمام موجودہ Excel فائلوں سے نام، ڈاکٹر اور ڈسپوزایبل کی یونیک لسٹ بنائیں"""
     names = set()
-    consultants = {"Dr. Anjum Rana"}  # ڈیفالٹ
+    consultants = {"Dr. Anjum Rana"}
     disposables = set()
 
     for filepath in DATA_DIR.glob("Patient List *.xlsx"):
@@ -81,11 +80,9 @@ def build_suggestions():
         "disposables": sorted(list(disposables))
     }
 
-# میموری میں Suggestions رکھیں (ہر بار ری لوڈ ہو جائیں گی)
 suggestions_cache = build_suggestions()
 
 def get_suggestions():
-    """Suggestions واپس کریں (اگر چاہیں تو ریفریش کریں)"""
     return suggestions_cache
 
 # ============================================================
@@ -314,10 +311,8 @@ async def submit(
         ]
         append_row_to_excel(month_year, row_data)
     
-    # Suggestions کو ریفریش کریں
     global suggestions_cache
     suggestions_cache = build_suggestions()
-    
     return RedirectResponse(f"/?date={date}", status_code=303)
 
 @app.get("/files")
@@ -351,55 +346,57 @@ async def download_file(month_year: str):
 
 @app.get("/arrange")
 async def arrange_file(month_year: str):
-    filepath = get_filepath(month_year)
-    if not filepath.exists():
-        return JSONResponse({"error": f"File {filepath.name} not found."}, status_code=404)
-    
-    wb = load_workbook(filepath)
-    ws = wb.active
-    headers = [cell.value for cell in ws[5]]
-    data_rows = []
-    for row in ws.iter_rows(min_row=6, values_only=True):
-        if row and any(row):
-            data_rows.append(row)
-    
-    # Sort by DATE then PROCEDURE
-    data_rows.sort(key=lambda x: (parse_date_dmy(x[1]) if x[1] else datetime.min, x[7] if x[7] else ""))
-    
-    # Reset Sr. No
-    for idx, row in enumerate(data_rows, start=1):
-        row[0] = idx
-    
-    new_wb = Workbook()
-    new_ws = new_wb.active
-    # Title
-    new_ws.merge_cells('A1:S4')
-    title_text = f"Patients List ({get_month_year_with_hyphen(month_year)})"
-    title_cell = new_ws.cell(row=1, column=1, value=title_text)
-    title_cell.font = Font(name='Calibri', size=18, bold=True, color="000000")
-    title_cell.alignment = Alignment(horizontal='center', vertical='center')
-    # Headers
-    for col_idx, h in enumerate(headers, 1):
-        cell = new_ws.cell(row=5, column=col_idx, value=h)
-        cell.font = Font(name='Calibri', size=14, bold=True, color="000000")
-        cell.alignment = Alignment(horizontal='center', vertical='center')
-    new_ws.row_dimensions[5].height = 30
-    # Data
-    for row_idx, row_data in enumerate(data_rows, 6):
-        for col_idx, value in enumerate(row_data, 1):
-            new_ws.cell(row=row_idx, column=col_idx, value=value)
-    
-    backup_path = filepath.with_suffix(".backup.xlsx")
-    if filepath.exists():
-        shutil.move(filepath, backup_path)
-    new_wb.save(filepath)
-    style_excel(filepath)
-    
-    # Suggestions کو ریفریش کریں
-    global suggestions_cache
-    suggestions_cache = build_suggestions()
-    
-    return {"message": f"File arranged successfully. Old file backed up as {backup_path.name}."}
+    try:
+        filepath = get_filepath(month_year)
+        if not filepath.exists():
+            return JSONResponse({"error": f"File {filepath.name} not found."}, status_code=404)
+        
+        wb = load_workbook(filepath)
+        ws = wb.active
+        headers = [cell.value for cell in ws[5]]
+        data_rows = []
+        for row in ws.iter_rows(min_row=6, values_only=True):
+            if row and any(row):
+                data_rows.append(list(row))  # make mutable
+        
+        if not data_rows:
+            return JSONResponse({"error": "No data rows to arrange."}, status_code=400)
+        
+        # Sort by DATE then PROCEDURE
+        data_rows.sort(key=lambda x: (parse_date_dmy(x[1]) if x[1] else datetime.min, x[7] if x[7] else ""))
+        
+        # Reassign Sr. No
+        for idx, row in enumerate(data_rows, start=1):
+            row[0] = idx
+        
+        # Create new workbook
+        new_wb = Workbook()
+        new_ws = new_wb.active
+        # Title
+        new_ws.merge_cells('A1:S4')
+        title_text = f"Patients List ({get_month_year_with_hyphen(month_year)})"
+        title_cell = new_ws.cell(row=1, column=1, value=title_text)
+        title_cell.font = Font(name='Calibri', size=18, bold=True, color="000000")
+        title_cell.alignment = Alignment(horizontal='center', vertical='center')
+        # Headers
+        for col_idx, h in enumerate(headers, 1):
+            cell = new_ws.cell(row=5, column=col_idx, value=h)
+            cell.font = Font(name='Calibri', size=14, bold=True, color="000000")
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+        new_ws.row_dimensions[5].height = 30
+        # Data
+        for row_idx, row_data in enumerate(data_rows, 6):
+            for col_idx, value in enumerate(row_data, 1):
+                new_ws.cell(row=row_idx, column=col_idx, value=value)
+        
+        backup_path = filepath.with_suffix(".backup.xlsx")
+        if filepath.exists():
+            shutil.move(filepath, backup_path)
+        new_wb.save(filepath)
+        style_excel(filepath)
+        return {"message": f"File arranged successfully. Old file backed up as {backup_path.name}."}
+    except Exception as e:
+        return JSONResponse({"error": f"Arrangement failed: {str(e)}"}, status_code=500)
 
 @app.delete("/delete-file")
 async def delete_file(month_year: str):

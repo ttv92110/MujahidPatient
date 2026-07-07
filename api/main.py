@@ -49,11 +49,38 @@ if not INDEX_HTML.exists():
     print(f"✅ Default index.html created at {INDEX_HTML}")
 
 # ============================================================
+# HELPER: Capitalize Words
+# ============================================================
+def capitalize_words(text: str) -> str:
+    """
+    ہر لفظ کا پہلا حرف بڑا کریں اور باقی چھوٹے۔
+    اگر "Dr." سے شروع ہو تو "Dr." کو محفوظ رکھیں۔
+    """
+    if not text:
+        return text
+    
+    text = text.strip()
+    
+    # اگر ڈاکٹر کا نام ہے تو "Dr." کو محفوظ رکھیں
+    if text.lower().startswith("dr."):
+        # "Dr." کے بعد کا حصہ
+        rest = text[3:].strip()
+        if rest:
+            # باقی حصے کو Capitalize کریں
+            rest = ' '.join(word.capitalize() for word in rest.split())
+            return f"Dr. {rest}"
+        else:
+            return "Dr."
+    else:
+        # عام نام: ہر لفظ کا پہلا حرف بڑا
+        return ' '.join(word.capitalize() for word in text.split())
+
+# ============================================================
 # SUGGESTIONS (میموری میں)
 # ============================================================
 def build_suggestions():
     names = set()
-    consultants = {"Dr. Anjum Rana"}
+    consultants = {"Dr. Anjum Rana"}  # ڈیفالٹ پہلے سے Capitalized
     disposables = set()
 
     for filepath in DATA_DIR.glob("Patient List *.xlsx"):
@@ -66,11 +93,11 @@ def build_suggestions():
                     consultant = row[6] if len(row) > 6 else None
                     disposable = row[13] if len(row) > 13 else None
                     if name:
-                        names.add(name)
+                        names.add(capitalize_words(str(name)))
                     if consultant:
-                        consultants.add(consultant)
+                        consultants.add(capitalize_words(str(consultant)))
                     if disposable:
-                        disposables.add(disposable)
+                        disposables.add(capitalize_words(str(disposable)))
         except Exception as e:
             print(f"Error reading {filepath}: {e}")
 
@@ -290,8 +317,14 @@ async def submit(
     scan_done: str = Form(""),
     sr_no_hidden: Optional[int] = Form(None),
 ):
+    # ناموں کو Capitalize کریں
+    name = capitalize_words(name)
+    consultant = capitalize_words(consultant)
+    disposable = capitalize_words(disposable)
+    
     month_year = get_month_year_from_date(date)
     date_dmy = format_date_dmy(date)
+    
     if sr_no_hidden:
         row_data = [
             sr_no_hidden, date_dmy, name, age, category, mr_no,
@@ -311,8 +344,10 @@ async def submit(
         ]
         append_row_to_excel(month_year, row_data)
     
+    # Suggestions کو ریفریش کریں
     global suggestions_cache
     suggestions_cache = build_suggestions()
+    
     return RedirectResponse(f"/?date={date}", status_code=303)
 
 @app.get("/files")
@@ -357,7 +392,7 @@ async def arrange_file(month_year: str):
         data_rows = []
         for row in ws.iter_rows(min_row=6, values_only=True):
             if row and any(row):
-                data_rows.append(list(row))  # make mutable
+                data_rows.append(list(row))
         
         if not data_rows:
             return JSONResponse({"error": "No data rows to arrange."}, status_code=400)

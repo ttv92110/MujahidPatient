@@ -6,21 +6,28 @@ from pathlib import Path
 from datetime import datetime
 import json
 import shutil
+import os
 from typing import Optional
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 # ====== BASE PATHS ======
-BASE_DIR = Path(__file__).parent.parent   # -> MujahidPatient/
+BASE_DIR = Path(__file__).parent.parent
+
+# Vercel پر /tmp استعمال کریں، ورنہ مقامی ڈائریکٹری
+if os.environ.get("VERCEL"):
+    DATA_DIR = Path("/tmp/data")
+else:
+    DATA_DIR = BASE_DIR / "data"
+
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
-DATA_DIR = BASE_DIR / "data"
-SUGGESTIONS_FILE = BASE_DIR / "suggestions.json"
 
+# ڈائریکٹریز بنائیں (صرف مقامی یا /tmp پر)
+DATA_DIR.mkdir(exist_ok=True)
 TEMPLATES_DIR.mkdir(exist_ok=True)
 STATIC_DIR.mkdir(exist_ok=True)
-DATA_DIR.mkdir(exist_ok=True)
 
 # ====== APP ======
 app = FastAPI(title="Patient Data Entry")
@@ -42,41 +49,44 @@ if not INDEX_HTML.exists():
     print(f"✅ Default index.html created at {INDEX_HTML}")
 
 # ============================================================
-# SUGGESTIONS
+# SUGGESTIONS (اب فائل سے نہیں، براہ راست Excel سے)
 # ============================================================
-def load_suggestions():
-    if SUGGESTIONS_FILE.exists():
-        with open(SUGGESTIONS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"names": [], "consultants": ["Dr. Anjum Rana"], "disposables": []}
+def build_suggestions():
+    """تمام موجودہ Excel فائلوں سے نام، ڈاکٹر اور ڈسپوزایبل کی یونیک لسٹ بنائیں"""
+    names = set()
+    consultants = {"Dr. Anjum Rana"}  # ڈیفالٹ
+    disposables = set()
 
-def save_suggestions(suggestions):
-    with open(SUGGESTIONS_FILE, "w", encoding="utf-8") as f:
-        json.dump(suggestions, f, indent=2, ensure_ascii=False)
-
-def gather_existing_values():
-    suggestions = load_suggestions()
-    for file in DATA_DIR.glob("Patient List *.xlsx"):
+    for filepath in DATA_DIR.glob("Patient List *.xlsx"):
         try:
-            wb = load_workbook(file)
+            wb = load_workbook(filepath)
             ws = wb.active
             for row in ws.iter_rows(min_row=6, values_only=True):
                 if row and any(row):
                     name = row[2] if len(row) > 2 else None
                     consultant = row[6] if len(row) > 6 else None
                     disposable = row[13] if len(row) > 13 else None
-                    if name and name not in suggestions["names"]:
-                        suggestions["names"].append(name)
-                    if consultant and consultant not in suggestions["consultants"]:
-                        suggestions["consultants"].append(consultant)
-                    if disposable and disposable not in suggestions["disposables"]:
-                        suggestions["disposables"].append(disposable)
+                    if name:
+                        names.add(name)
+                    if consultant:
+                        consultants.add(consultant)
+                    if disposable:
+                        disposables.add(disposable)
         except Exception as e:
-            print(f"Error reading {file}: {e}")
-    save_suggestions(suggestions)
-    return suggestions
+            print(f"Error reading {filepath}: {e}")
 
-suggestions_data = gather_existing_values()
+    return {
+        "names": sorted(list(names)),
+        "consultants": sorted(list(consultants)),
+        "disposables": sorted(list(disposables))
+    }
+
+# میموری میں Suggestions رکھیں (ہر بار ری لوڈ ہو جائیں گی)
+suggestions_cache = build_suggestions()
+
+def get_suggestions():
+    """Suggestions واپس کریں (اگر چاہیں تو ریفریش کریں)"""
+    return suggestions_cache
 
 # ============================================================
 # HELPER FUNCTIONS
@@ -240,23 +250,13 @@ def get_all_rows(month_year_str):
             rows.append(list(row))
     return rows
 
-def update_suggestions(name, consultant, disposable):
-    suggestions = load_suggestions()
-    if name and name not in suggestions["names"]:
-        suggestions["names"].append(name)
-    if consultant and consultant not in suggestions["consultants"]:
-        suggestions["consultants"].append(consultant)
-    if disposable and disposable not in suggestions["disposables"]:
-        suggestions["disposables"].append(disposable)
-    save_suggestions(suggestions)
-
 # ============================================================
 # ENDPOINTS
 # ============================================================
 
 @app.get("/")
 async def home(request: Request, date: Optional[str] = Query(None)):
-    suggestions = load_suggestions()
+    suggestions = get_suggestions()
     if date:
         selected_date = date
     else:
@@ -313,7 +313,11 @@ async def submit(
             cath_share, doc_share, ssp_claim, status, scan_done
         ]
         append_row_to_excel(month_year, row_data)
-    update_suggestions(name, consultant, disposable)
+    
+    # Suggestions کو ریفریش کریں (اگر نیا ڈیٹا شامل ہوا)
+    global suggestions_cache
+    suggestions_cache = build_suggestions()
+    
     return RedirectResponse(f"/?date={date}", status_code=303)
 
 @app.get("/files")
@@ -334,6 +338,9 @@ async def preview_data(month_year: str):
 @app.post("/delete")
 async def delete_row(month_year: str = Form(...), sr_no: int = Form(...)):
     success = delete_row_from_excel(month_year, sr_no)
+    # Suggestions کو ریفریش کریں
+    global suggestions_cache
+    suggestions_cache = build_suggestions()
     return {"success": success}
 
 @app.get("/download")
@@ -357,28 +364,23 @@ async def arrange_file(month_year: str):
         if row and any(row):
             data_rows.append(row)
     
-    # Sort by DATE then PROCEDURE
     data_rows.sort(key=lambda x: (parse_date_dmy(x[1]) if x[1] else datetime.min, x[7] if x[7] else ""))
     
-    # ---- Sr. No کو دوبارہ ترتیب دیں (1,2,3,...) ----
     for idx, row in enumerate(data_rows, start=1):
-        row[0] = idx  # پہلا کالم Sr. No ہے
+        row[0] = idx
     
     new_wb = Workbook()
     new_ws = new_wb.active
-    # Title
     new_ws.merge_cells('A1:S4')
     title_text = f"Patients List ({get_month_year_with_hyphen(month_year)})"
     title_cell = new_ws.cell(row=1, column=1, value=title_text)
     title_cell.font = Font(name='Calibri', size=18, bold=True, color="000000")
     title_cell.alignment = Alignment(horizontal='center', vertical='center')
-    # Headers
     for col_idx, h in enumerate(headers, 1):
         cell = new_ws.cell(row=5, column=col_idx, value=h)
         cell.font = Font(name='Calibri', size=14, bold=True, color="000000")
         cell.alignment = Alignment(horizontal='center', vertical='center')
     new_ws.row_dimensions[5].height = 30
-    # Data
     for row_idx, row_data in enumerate(data_rows, 6):
         for col_idx, value in enumerate(row_data, 1):
             new_ws.cell(row=row_idx, column=col_idx, value=value)

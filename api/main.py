@@ -314,7 +314,7 @@ async def submit(
         ]
         append_row_to_excel(month_year, row_data)
     
-    # Suggestions کو ریفریش کریں (اگر نیا ڈیٹا شامل ہوا)
+    # Suggestions کو ریفریش کریں
     global suggestions_cache
     suggestions_cache = build_suggestions()
     
@@ -338,7 +338,6 @@ async def preview_data(month_year: str):
 @app.post("/delete")
 async def delete_row(month_year: str = Form(...), sr_no: int = Form(...)):
     success = delete_row_from_excel(month_year, sr_no)
-    # Suggestions کو ریفریش کریں
     global suggestions_cache
     suggestions_cache = build_suggestions()
     return {"success": success}
@@ -364,23 +363,28 @@ async def arrange_file(month_year: str):
         if row and any(row):
             data_rows.append(row)
     
+    # Sort by DATE then PROCEDURE
     data_rows.sort(key=lambda x: (parse_date_dmy(x[1]) if x[1] else datetime.min, x[7] if x[7] else ""))
     
+    # Reset Sr. No
     for idx, row in enumerate(data_rows, start=1):
         row[0] = idx
     
     new_wb = Workbook()
     new_ws = new_wb.active
+    # Title
     new_ws.merge_cells('A1:S4')
     title_text = f"Patients List ({get_month_year_with_hyphen(month_year)})"
     title_cell = new_ws.cell(row=1, column=1, value=title_text)
     title_cell.font = Font(name='Calibri', size=18, bold=True, color="000000")
     title_cell.alignment = Alignment(horizontal='center', vertical='center')
+    # Headers
     for col_idx, h in enumerate(headers, 1):
         cell = new_ws.cell(row=5, column=col_idx, value=h)
         cell.font = Font(name='Calibri', size=14, bold=True, color="000000")
         cell.alignment = Alignment(horizontal='center', vertical='center')
     new_ws.row_dimensions[5].height = 30
+    # Data
     for row_idx, row_data in enumerate(data_rows, 6):
         for col_idx, value in enumerate(row_data, 1):
             new_ws.cell(row=row_idx, column=col_idx, value=value)
@@ -390,6 +394,11 @@ async def arrange_file(month_year: str):
         shutil.move(filepath, backup_path)
     new_wb.save(filepath)
     style_excel(filepath)
+    
+    # Suggestions کو ریفریش کریں
+    global suggestions_cache
+    suggestions_cache = build_suggestions()
+    
     return {"message": f"File arranged successfully. Old file backed up as {backup_path.name}."}
 
 @app.delete("/delete-file")

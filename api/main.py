@@ -292,6 +292,59 @@ def get_all_rows(month_year_str):
             rows.append(list(row))
     return rows
 
+
+# ============================================================
+# HELPER: Capitalize Words
+# ============================================================
+def capitalize_words(text: str) -> str:
+    if not text:
+        return text
+    text = text.strip()
+    if text.lower().startswith("dr."):
+        rest = text[3:].strip()
+        if rest:
+            rest = ' '.join(word.capitalize() for word in rest.split())
+            return f"Dr. {rest}"
+        else:
+            return "Dr."
+    else:
+        return ' '.join(word.capitalize() for word in text.split())
+
+# ============================================================
+# SUGGESTIONS
+# ============================================================
+def build_suggestions():
+    names = set()
+    consultants = {"Dr. Anjum Rana"}
+    disposables = set()
+    for filepath in LOCAL_DATA_DIR.glob("Patient List *.xlsx"):
+        try:
+            wb = load_workbook(filepath)
+            ws = wb.active
+            for row in ws.iter_rows(min_row=6, values_only=True):
+                if row and any(row):
+                    name = row[2] if len(row) > 2 else None
+                    consultant = row[6] if len(row) > 6 else None
+                    disposable = row[13] if len(row) > 13 else None
+                    if name:
+                        names.add(capitalize_words(str(name)))
+                    if consultant:
+                        consultants.add(capitalize_words(str(consultant)))
+                    if disposable:
+                        disposables.add(capitalize_words(str(disposable)))
+        except Exception as e:
+            print(f"Error reading {filepath}: {e}")
+    return {
+        "names": sorted(list(names)),
+        "consultants": sorted(list(consultants)),
+        "disposables": sorted(list(disposables))
+    }
+
+suggestions_cache = build_suggestions()
+
+def get_suggestions():
+    return suggestions_cache
+
 # ============================================================
 # OTHER HELPER FUNCTIONS
 # ============================================================
@@ -351,6 +404,7 @@ async def home(request: Request, date: Optional[str] = Query(None)):
         "default_consultant": "Dr. Anjum Rana",
         "selected_date": selected_date
     })
+
 
 @app.post("/submit")
 async def submit(

@@ -15,6 +15,9 @@
         .form-group input, .form-group select { padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; transition: 0.2s; }
         .form-group input:focus, .form-group select:focus { border-color: #4F81BD; outline: none; box-shadow: 0 0 0 3px rgba(79,129,189,0.2); }
         .full-width { grid-column: 1 / -1; }
+        .age-container { display: flex; align-items: center; gap: 5px; }
+        .age-container input[type="number"] { flex: 3; min-width: 80px; }
+        .age-container input[type="text"] { flex: 1; min-width: 40px; max-width: 60px; text-align: center; }
         .btn { padding: 10px 20px; border: none; border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; transition: 0.2s; }
         .btn-primary { background: #4F81BD; color: white; }
         .btn-primary:hover { background: #3a6a9e; }
@@ -46,34 +49,39 @@
     <!-- FORM -->
     <form id="entryForm" action="/submit" method="post">
         <input type="hidden" id="sr_no_hidden" name="sr_no_hidden" value="">
+        <input type="hidden" id="age_hidden" name="age" value="50y">
 
         <div class="form-grid">
             <!-- DATE -->
             <div class="form-group">
                 <label for="date">DATE (Select)</label>
-                <input type="date" id="date" name="date" required value="{{ selected_date }}">
+                <input type="date" id="date" name="date" required value="{{ selected_date }}" tabindex="1">
             </div>
             <!-- NAME -->
             <div class="form-group">
                 <label for="name">NAME</label>
-                <input type="text" id="name" name="name" list="nameList" required autocomplete="off" placeholder="Enter name">
+                <input type="text" id="name" name="name" list="nameList" required autocomplete="off" placeholder="Enter name" tabindex="2" autofocus>
                 <datalist id="nameList">{% for n in names %}<option value="{{ n }}">{% endfor %}</datalist>
             </div>
-            <!-- AGE -->
+            <!-- AGE (number + unit) -->
             <div class="form-group">
-                <label for="age">AGE</label>
-                <input type="text" id="age" name="age" value="50y" required>
-            </div> 
+                <label for="age_number">AGE</label>
+                <div class="age-container">
+                    <input type="number" id="age_number" value="50" min="0" max="150" required tabindex="3" step="1">
+                    <input type="text" id="age_unit" value="y" maxlength="10" tabindex="4" style="text-align:center; max-width:50px;">
+                </div>
+                <!-- <small style="color:#888;">Enter number and unit (e.g., y, months, days)</small> -->
+            </div>
             <!-- CONSULTANT -->
             <div class="form-group">
                 <label for="consultant">CONSULTANT NAME</label>
-                <input type="text" id="consultant" name="consultant" list="consultantList" required value="{{ default_consultant }}" autocomplete="off">
+                <input type="text" id="consultant" name="consultant" list="consultantList" required value="{{ default_consultant }}" autocomplete="off" tabindex="5">
                 <datalist id="consultantList">{% for c in consultants %}<option value="{{ c }}">{% endfor %}</datalist>
             </div>
             <!-- PROCEDURE SELECTOR -->
             <div class="form-group">
                 <label for="procedure_select">PROCEDURE SELECT</label>
-                <select id="procedure_select" onchange="updateProcedureTax()">
+                <select id="procedure_select" onchange="updateProcedureTax()" tabindex="6">
                     <option value="0">0 - C/Angio (Tax: 1369)</option>
                     <option value="1">1 - C/Angio + PCI (Tax: 11650)</option>
                     <option value="2">2 - C/Angio + PCI (2 stents) (Tax: 17519)</option>
@@ -83,69 +91,72 @@
             <!-- PROCEDURE (editable) -->
             <div class="form-group">
                 <label for="procedure">PROCEDURE (editable)</label>
-                <input type="text" id="procedure" name="procedure" required value="C/Angio">
+                <input type="text" id="procedure" name="procedure" required value="C/Angio" tabindex="7">
             </div>
 
-            <!-- TOTAL COST -->
+            <!-- TOTAL COST (auto-filled with most frequent value) -->
             <div class="form-group">
                 <label for="total_cost">TOTAL COST</label>
-                <input type="number" id="total_cost" name="total_cost" step="0.01" required value="22908" oninput="calcTotalAfter()">
+                <input type="number" id="total_cost" name="total_cost" step="0.01" required value="" oninput="calcTotalAfter()" list="totalCostList" tabindex="8" placeholder="Auto-filled from frequent values">
+                <datalist id="totalCostList"></datalist>
+                <!-- <small style="color:#888;">Automatically filled with the most frequent value for selected procedure. You can change manually.</small> -->
             </div>
 
-            <!-- TAX -->
-            <div class="form-group">
-                <label for="tax">11% TAX Deduction</label>
-                <input type="number" id="tax" name="tax" step="0.01" required value="1369">
-            </div>
-             
-            <!-- TOTAL AFTER -->
-            <div class="form-group">
-                <label for="total_after">Total Cost After 11% TAX</label>
-                <input type="number" id="total_after" name="total_after" step="0.01" required value="21539">
-            </div>
             <!-- DISPOSABLE -->
             <div class="form-group">
                 <label for="disposable">DISPOSABLE</label>
-                <input type="text" id="disposable" name="disposable"  value="11500" list="disposableList" required autocomplete="off" placeholder="Enter disposable">
+                <input type="text" id="disposable" name="disposable" value="11500" list="disposableList" required autocomplete="off" placeholder="Enter disposable" tabindex="9">
                 <datalist id="disposableList">{% for d in disposables %}<option value="{{ d }}">{% endfor %}</datalist>
             </div>
-         
-            </br>
+        </div>
+
+        <hr style="margin:20px 0;">
+
         <div style="text-align: center; margin-top: 20px;">
             <button type="submit" class="btn btn-primary" id="submitBtn">💾 Save Record</button>
             <button type="button" class="btn btn-warning" onclick="resetForm()" style="margin-left:10px;">↺ Clear</button>
         </div>
-        </br>
-            <hr>
-            <hr>
-            <hr>
+        <hr style="margin:20px 0;">
+
+        <div class="form-grid">
+            <!-- TAX -->
+            <div class="form-group">
+                <label for="tax">11% TAX Deduction</label>
+                <input type="number" id="tax" name="tax" step="0.01" required value="1369" tabindex="10">
+            </div>
+            <!-- TOTAL AFTER -->
+            <div class="form-group">
+                <label for="total_after">Total Cost After 11% TAX</label>
+                <input type="number" id="total_after" name="total_after" step="0.01" required value="21539" tabindex="11">
+            </div>
             <!-- MR#NO -->
             <div class="form-group">
                 <label for="mr_no">MR#NO</label>
-                <input type="text" id="mr_no" name="mr_no" placeholder="Optional">
+                <input type="text" id="mr_no" name="mr_no" placeholder="Optional" tabindex="12">
             </div>
             <!-- CATEGORY -->
             <div class="form-group">
                 <label for="category">CATEGORY</label>
-                <input type="text" id="category" name="category" value="Healthcard" required>
-            </div> 
+                <input type="text" id="category" name="category" value="Healthcard" required tabindex="13">
+            </div>
             <!-- OTHER FIELDS -->
-            <div class="form-group"><label for="payment">PAYMENT</label><input type="text" id="payment" name="payment"></div>
-            <div class="form-group"><label for="received">RECEIVED</label><input type="text" id="received" name="received"></div>
-            <div class="form-group"><label for="cath_share">CATH SHARE</label><input type="text" id="cath_share" name="cath_share"></div>
-            <div class="form-group"><label for="doc_share">DOC SHARE</label><input type="text" id="doc_share" name="doc_share"></div>
-            <div class="form-group"><label for="ssp_claim">SSP CLAIM</label><input type="text" id="ssp_claim" name="ssp_claim"></div>
-            <div class="form-group"><label for="status">Status</label><input type="text" id="status" name="status"></div>
-            <div class="form-group"><label for="scan_done">Scan Done/Upload</label><input type="text" id="scan_done" name="scan_done"></div>
+            <div class="form-group"><label for="payment">PAYMENT</label><input type="text" id="payment" name="payment" tabindex="14"></div>
+            <div class="form-group"><label for="received">RECEIVED</label><input type="text" id="received" name="received" tabindex="15"></div>
+            <div class="form-group"><label for="cath_share">CATH SHARE</label><input type="text" id="cath_share" name="cath_share" tabindex="16"></div>
+            <div class="form-group"><label for="doc_share">DOC SHARE</label><input type="text" id="doc_share" name="doc_share" tabindex="17"></div>
+            <div class="form-group"><label for="ssp_claim">SSP CLAIM</label><input type="text" id="ssp_claim" name="ssp_claim" tabindex="18"></div>
+            <div class="form-group"><label for="status">Status</label><input type="text" id="status" name="status" tabindex="19"></div>
+            <div class="form-group"><label for="scan_done">Scan Done/Upload</label><input type="text" id="scan_done" name="scan_done" tabindex="20"></div>
         </div>
 
+        <hr style="margin:20px 0;">
         <div style="text-align: center; margin-top: 20px;">
             <button type="submit" class="btn btn-primary" id="submitBtn">💾 Save Record</button>
             <button type="button" class="btn btn-warning" onclick="resetForm()" style="margin-left:10px;">↺ Clear</button>
         </div>
     </form>
 
-    <!-- ACTIONS (Download / Arrange Dropdown) -->
+    <!-- ACTIONS -->
     <div class="actions">
         <select id="fileSelect">
             <option value="">-- Select File --</option>
@@ -155,10 +166,10 @@
         <button class="btn btn-danger" onclick="deleteFile()">🗑 Delete File</button>
     </div>
 
-    <!-- DATA PREVIEW TABLE -->
+    <!-- DATA PREVIEW -->
     <div class="table-wrapper">
         <table>
-            <thead id="tableHead">
+            <thead>
                 <tr>
                     <th>Sr.No</th><th>DATE</th><th>NAME</th><th>AGE</th><th>CATEGORY</th>
                     <th>MR#NO</th><th>CONSULTANT</th><th>PROCEDURE</th><th>TOTAL</th>
@@ -175,13 +186,39 @@
 </div>
 
 <script>
-    // ====== PROCEDURE MAP ======
+    // ====== GLOBAL ======
+    let allDataRows = [];
+    let isEditMode = false;  // to prevent auto-fill during edit
+
     const procMap = {
         "0": { proc: "C/Angio", tax: 1369 },
         "1": { proc: "C/Angio + PCI", tax: 11650 },
         "2": { proc: "C/Angio + PCI", tax: 17519 },
         "3": { proc: "C/Angio + PCI", tax: 20542 }
     };
+
+    function getMostFrequentCost(procText) {
+        if (!allDataRows || allDataRows.length === 0) return null;
+        const filtered = allDataRows.filter(row => row[7] === procText);
+        if (filtered.length === 0) return null;
+        const freq = {};
+        filtered.forEach(row => {
+            const cost = row[8];
+            if (cost !== undefined && cost !== null && cost !== '') {
+                const key = cost.toString();
+                freq[key] = (freq[key] || 0) + 1;
+            }
+        });
+        let maxCount = 0;
+        let mostFrequent = null;
+        for (const [cost, count] of Object.entries(freq)) {
+            if (count > maxCount) {
+                maxCount = count;
+                mostFrequent = cost;
+            }
+        }
+        return mostFrequent;
+    }
 
     function updateProcedureTax() {
         const sel = document.getElementById('procedure_select');
@@ -190,7 +227,18 @@
         if (data) {
             document.getElementById('procedure').value = data.proc;
             document.getElementById('tax').value = data.tax;
+            // Auto-fill total cost with most frequent value for this procedure (only if not editing)
+            if (!isEditMode) {
+                const mostFreq = getMostFrequentCost(data.proc);
+                if (mostFreq !== null) {
+                    document.getElementById('total_cost').value = mostFreq;
+                } else {
+                    // If no data, you can set to empty or keep previous; we'll set to empty
+                    document.getElementById('total_cost').value = '';
+                }
+            }
             calcTotalAfter();
+            updateTotalCostSuggestions(data.proc);
         }
     }
 
@@ -200,15 +248,55 @@
         document.getElementById('total_after').value = (totalCost - tax).toFixed(2);
     }
 
+    function updateTotalCostSuggestions(procedureText) {
+        const datalist = document.getElementById('totalCostList');
+        datalist.innerHTML = '';
+        const filtered = allDataRows.filter(row => row[7] === procedureText);
+        if (filtered.length === 0) return;
+        const freq = {};
+        filtered.forEach(row => {
+            const cost = row[8];
+            if (cost !== undefined && cost !== null && cost !== '') {
+                const key = cost.toString();
+                freq[key] = (freq[key] || 0) + 1;
+            }
+        });
+        for (const [cost, count] of Object.entries(freq)) {
+            if (count > 2) {
+                const option = document.createElement('option');
+                option.value = cost;
+                datalist.appendChild(option);
+            }
+        }
+    }
+
     function resetForm() {
         document.getElementById('entryForm').reset();
         document.getElementById('sr_no_hidden').value = '';
         document.getElementById('submitBtn').textContent = '💾 Save Record';
         document.getElementById('procedure_select').value = '0';
-        updateProcedureTax();
+        document.getElementById('age_number').value = 50;
+        document.getElementById('age_unit').value = 'y';
+        isEditMode = false;
+        updateAgeHidden();
+        updateProcedureTax(); // This will fill total cost with most frequent
+        document.getElementById('name').focus();
     }
 
-    // ====== LOAD FILES DROPDOWN ======
+    // ====== AGE: combine number + unit ======
+    function updateAgeHidden() {
+        const num = document.getElementById('age_number').value;
+        const unit = document.getElementById('age_unit').value.trim() || 'y';
+        document.getElementById('age_hidden').value = num + unit;
+    }
+    document.getElementById('age_number').addEventListener('input', updateAgeHidden);
+    document.getElementById('age_unit').addEventListener('input', updateAgeHidden);
+
+    document.getElementById('entryForm').addEventListener('submit', function(e) {
+        updateAgeHidden();
+    });
+
+    // ====== LOAD FILES ======
     async function loadFiles() {
         const res = await fetch('/files');
         const files = await res.json();
@@ -220,7 +308,6 @@
             opt.textContent = f.month_year;
             select.appendChild(opt);
         });
-        // Auto-select current month based on date input
         const dateInput = document.getElementById('date');
         if (dateInput.value) {
             const parts = dateInput.value.split('-');
@@ -244,50 +331,64 @@
         const monthYear = select.value;
         if (!monthYear) {
             document.getElementById('tableBody').innerHTML = '<tr><td colspan="13" class="empty-msg">Please select a file.</td></tr>';
+            allDataRows = [];
             return;
         }
         const res = await fetch(`/preview?month_year=${encodeURIComponent(monthYear)}`);
         const data = await res.json();
+        allDataRows = data;
         const tbody = document.getElementById('tableBody');
         if (data.length === 0) {
             tbody.innerHTML = '<tr><td colspan="13" class="empty-msg">No records found in this file.</td></tr>';
-            return;
+        } else {
+            let html = '';
+            data.forEach(row => {
+                const sr = row[0] || '';
+                const date = row[1] || '';
+                const name = row[2] || '';
+                const age = row[3] || '';
+                const cat = row[4] || '';
+                const mr = row[5] || '';
+                const doc = row[6] || '';
+                const proc = row[7] || '';
+                const total = row[8] || '';
+                const tax = row[9] || '';
+                const after = row[10] || '';
+                const disposable = row[13] || '';
+                html += `<tr>
+                    <td><strong>${sr}</strong></td>
+                    <td>${date}</td>
+                    <td>${name}</td>
+                    <td>${age}</td>
+                    <td>${cat}</td>
+                    <td>${mr}</td>
+                    <td>${doc}</td>
+                    <td>${proc}</td>
+                    <td>${total}</td>
+                    <td>${tax}</td>
+                    <td>${after}</td>
+                    <td>${disposable}</td>
+                    <td class="action-btns">
+                        <button class="btn btn-warning btn-sm" onclick="editRow(${sr})">✎ Edit</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteRow(${sr})">✕ Del</button>
+                    </td>
+                </tr>`;
+            });
+            tbody.innerHTML = html;
         }
-        let html = '';
-        data.forEach(row => {
-            // row indices: 0=Sr, 1=DATE, 2=NAME, 3=AGE, 4=CAT, 5=MR, 6=DOC, 7=PROC, 8=TOTAL, 9=TAX, 10=AFTER, 11=PAYMENT, 12=RECEIVED, 13=DISPOSABLE, ...
-            const sr = row[0] || '';
-            const date = row[1] || '';
-            const name = row[2] || '';
-            const age = row[3] || '';
-            const cat = row[4] || '';
-            const mr = row[5] || '';
-            const doc = row[6] || '';
-            const proc = row[7] || '';
-            const total = row[8] || '';
-            const tax = row[9] || '';
-            const after = row[10] || '';
-            const disposable = row[13] || '';
-            html += `<tr>
-                <td><strong>${sr}</strong></td>
-                <td>${date}</td>
-                <td>${name}</td>
-                <td>${age}</td>
-                <td>${cat}</td>
-                <td>${mr}</td>
-                <td>${doc}</td>
-                <td>${proc}</td>
-                <td>${total}</td>
-                <td>${tax}</td>
-                <td>${after}</td>
-                <td>${disposable}</td>
-                <td class="action-btns">
-                    <button class="btn btn-warning btn-sm" onclick="editRow(${sr})">✎ Edit</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteRow(${sr})">✕ Del</button>
-                </td>
-            </tr>`;
-        });
-        tbody.innerHTML = html;
+        // After loading, update total cost with most frequent for current procedure
+        // But only if not in edit mode
+        if (!isEditMode) {
+            const currentProc = document.getElementById('procedure').value;
+            const mostFreq = getMostFrequentCost(currentProc);
+            if (mostFreq !== null) {
+                document.getElementById('total_cost').value = mostFreq;
+                calcTotalAfter();
+            }
+        }
+        // Update suggestions
+        const currentProc = document.getElementById('procedure').value;
+        updateTotalCostSuggestions(currentProc);
     }
 
     // ====== EDIT ROW ======
@@ -295,16 +396,26 @@
         const select = document.getElementById('fileSelect');
         const monthYear = select.value;
         if (!monthYear) return alert('Please select a file first.');
-        
         fetch(`/preview?month_year=${encodeURIComponent(monthYear)}`)
             .then(res => res.json())
             .then(data => {
                 const row = data.find(r => r[0] === srNo);
                 if (!row) return alert('Record not found!');
-                // Fill form
+                // Set edit mode to prevent auto-fill
+                isEditMode = true;
                 document.getElementById('sr_no_hidden').value = srNo;
                 document.getElementById('name').value = row[2] || '';
-                document.getElementById('age').value = row[3] || '';
+                // AGE
+                const ageStr = row[3] || '50y';
+                const match = ageStr.match(/^(\d+)(.*)$/);
+                if (match) {
+                    document.getElementById('age_number').value = match[1] || 50;
+                    document.getElementById('age_unit').value = match[2] || 'y';
+                } else {
+                    document.getElementById('age_number').value = 50;
+                    document.getElementById('age_unit').value = 'y';
+                }
+                updateAgeHidden();
                 document.getElementById('category').value = row[4] || '';
                 document.getElementById('mr_no').value = row[5] || '';
                 document.getElementById('consultant').value = row[6] || '';
@@ -320,7 +431,6 @@
                 document.getElementById('ssp_claim').value = row[16] || '';
                 document.getElementById('status').value = row[17] || '';
                 document.getElementById('scan_done').value = row[18] || '';
-                // Set date (convert DD/MM/YYYY to YYYY-MM-DD for input)
                 const dateStr = row[1];
                 if (dateStr) {
                     const parts = dateStr.split('/');
@@ -329,8 +439,17 @@
                         document.getElementById('date').value = formatted;
                     }
                 }
+                const procText = row[7] || '';
+                for (let [key, val] of Object.entries(procMap)) {
+                    if (val.proc === procText) {
+                        document.getElementById('procedure_select').value = key;
+                        break;
+                    }
+                }
                 document.getElementById('submitBtn').textContent = '✏️ Update Record';
                 window.scrollTo({ top: 0, behavior: 'smooth' });
+                document.getElementById('name').focus();
+                // After editing, we don't auto-fill total cost; we keep the row's value.
             });
     }
 
@@ -340,28 +459,23 @@
         const monthYear = select.value;
         if (!monthYear) return alert('Please select a file first.');
         if (!confirm(`Are you sure you want to delete Sr. No ${srNo}?`)) return;
-        
         const formData = new FormData();
         formData.append('month_year', monthYear);
         formData.append('sr_no', srNo);
-        
-        fetch('/delete', {
-            method: 'POST',
-            body: formData
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.success) {
-                alert('Record deleted successfully!');
-                loadPreview();
-                loadFiles();
-            } else {
-                alert('Failed to delete record.');
-            }
-        });
+        fetch('/delete', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Record deleted successfully!');
+                    loadPreview();
+                    loadFiles();
+                } else {
+                    alert('Failed to delete record.');
+                }
+            });
     }
 
-    // ====== DOWNLOAD FILE ======
+    // ====== DOWNLOAD ======
     function downloadFile() {
         const select = document.getElementById('fileSelect');
         const monthYear = select.value;
@@ -369,13 +483,12 @@
         window.open(`/download?month_year=${encodeURIComponent(monthYear)}`, '_blank');
     }
 
-    // ====== ARRANGE FILE ======
+    // ====== ARRANGE ======
     function arrangeFile() {
         const select = document.getElementById('fileSelect');
         const monthYear = select.value;
         if (!monthYear) return alert('Please select a file first.');
         if (!confirm(`Arrange file "${monthYear}" by Date and Procedure?`)) return;
-        
         fetch(`/arrange?month_year=${encodeURIComponent(monthYear)}`)
             .then(response => {
                 if (!response.ok) {
@@ -399,7 +512,6 @@
         const monthYear = select.value;
         if (!monthYear) return alert('Please select a file first.');
         if (!confirm(`Are you sure you want to DELETE the entire file "${monthYear}"? This cannot be undone!`)) return;
-        // Delete via backend (we don't have direct delete endpoint, let's add one quickly via fetch)
         fetch(`/delete-file?month_year=${encodeURIComponent(monthYear)}`, { method: 'DELETE' })
             .then(res => res.json())
             .then(data => {
@@ -410,21 +522,22 @@
             .catch(() => alert('Error deleting file.'));
     }
 
-    // ====== ADD DELETE-FILE ENDPOINT (temporary, we'll handle in backend but we can just call it) ======
-    // Wait, we need to add this endpoint in main.py. I'll include it in the final code.
-    // But for now, let's just implement it.
-
-    // ====== AUTO LOAD ON PAGE LOAD ======
+    // ====== INIT ======
     window.onload = function() {
         loadFiles();
-        // Ensure date is set from backend
-        const dateInput = document.getElementById('date');
-        // If server passed selected_date, it's already set.
-        // Auto-select procedure from dropdown
-        updateProcedureTax();
+        updateAgeHidden();
+        // Initially not in edit mode
+        isEditMode = false;
+        // Set total cost based on default procedure (0) after data loads
+        // But loadFiles will trigger loadPreview, which will call update.
+        // However, we also need to run updateProcedureTax to set tax and procedure text.
+        // We'll call it after a slight delay to ensure allDataRows is loaded.
+        setTimeout(() => {
+            updateProcedureTax();
+        }, 100);
+        document.getElementById('name').focus();
     };
 
-    // Listen to file select change to refresh preview
     document.getElementById('fileSelect').addEventListener('change', loadPreview);
 </script>
 </body>

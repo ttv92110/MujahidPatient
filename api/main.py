@@ -16,7 +16,7 @@ from openpyxl.utils import get_column_letter
 
 # ====== GOOGLE DRIVE OAuth IMPORTS ======
 from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request as GoogleAuthRequest  # <-- یہاں نام تبدیل کیا
+from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
@@ -49,99 +49,71 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 # ============================================================
 # GOOGLE DRIVE AUTH (OAuth 2.0)
 # ============================================================
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+SCOPES = ["https://www.googleapis.com/auth/drive.file"]  # درست کیا گیا
+
+DRIVE_FOLDER_NAME = "Patient Data"  # فولڈر کا نام
 
 def get_drive_service():
-    """Get authenticated Drive service using OAuth 2.0"""
     creds = None
     if TOKEN_FILE.exists():
         with open(TOKEN_FILE, "rb") as token:
             creds = pickle.load(token)
-    
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(GoogleAuthRequest())
         else:
-            if not CLIENT_SECRETS_FILE.exists():
-                print("❌ client_secrets.json not found. Please download OAuth client credentials.")
-                return None
-            try:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    str(CLIENT_SECRETS_FILE), SCOPES)
-                # Use port 8080 to match redirect URI
-                creds = flow.run_local_server(port=8080, open_browser=True)
-            except Exception as e:
-                print(f"❌ OAuth flow failed: {e}")
-                return None
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(CLIENT_SECRETS_FILE), SCOPES)
+            creds = flow.run_local_server(port=0, open_browser=True)
         with open(TOKEN_FILE, "wb") as token:
             pickle.dump(creds, token)
-    
     return build("drive", "v3", credentials=creds)
 
-# ============================================================
-# HELPER: Capitalize Words
-# ============================================================
-def capitalize_words(text: str) -> str:
-    if not text:
-        return text
-    text = text.strip()
-    if text.lower().startswith("dr."):
-        rest = text[3:].strip()
-        if rest:
-            rest = ' '.join(word.capitalize() for word in rest.split())
-            return f"Dr. {rest}"
-        else:
-            return "Dr."
+# ====== FIND OR CREATE FOLDER ======
+_folder_id_cache = None  # پہلی بار حاصل کرنے کے بعد کیش میں رکھیں
+
+def get_or_create_drive_folder(service):
+    """Drive پر 'Patient Data' فولڈر ڈھونڈیں یا بنائیں اور اس کی ID واپس کریں"""
+    global _folder_id_cache
+    if _folder_id_cache:
+        return _folder_id_cache
+
+    # تلاش کریں کہ کیا فولڈر پہلے سے موجود ہے
+    query = f"name='{DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    results = service.files().list(q=query, fields="files(id, name)").execute()
+    folders = results.get("files", [])
+
+    if folders:
+        folder_id = folders[0]["id"]
     else:
-        return ' '.join(word.capitalize() for word in text.split())
+        # فولڈر موجود نہیں، نیا بنائیں
+        file_metadata = {
+            "name": DRIVE_FOLDER_NAME,
+            "mimeType": "application/vnd.google-apps.folder"
+        }
+        folder = service.files().create(body=file_metadata, fields="id").execute()
+        folder_id = folder["id"]
+
+    _folder_id_cache = folder_id
+    return folder_id
 
 # ============================================================
-# SUGGESTIONS
+# DRIVE SYNC FUNCTIONS (OAuth) - Folder Aware
 # ============================================================
-def build_suggestions():
-    names = set()
-    consultants = {"Dr. Anjum Rana"}
-    disposables = set()
-    for filepath in LOCAL_DATA_DIR.glob("Patient List *.xlsx"):
-        try:
-            wb = load_workbook(filepath)
-            ws = wb.active
-            for row in ws.iter_rows(min_row=6, values_only=True):
-                if row and any(row):
-                    name = row[2] if len(row) > 2 else None
-                    consultant = row[6] if len(row) > 6 else None
-                    disposable = row[13] if len(row) > 13 else None
-                    if name:
-                        names.add(capitalize_words(str(name)))
-                    if consultant:
-                        consultants.add(capitalize_words(str(consultant)))
-                    if disposable:
-                        disposables.add(capitalize_words(str(disposable)))
-        except Exception as e:
-            print(f"Error reading {filepath}: {e}")
-    return {
-        "names": sorted(list(names)),
-        "consultants": sorted(list(consultants)),
-        "disposables": sorted(list(disposables))
-    }
-
-suggestions_cache = build_suggestions()
-
-def get_suggestions():
-    return suggestions_cache
-
-# ============================================================
-# DRIVE SYNC FUNCTIONS (OAuth)
-# ============================================================
-def find_or_create_drive_file(service, month_year_str):
+def find_or_create_drive_file(service, month_year_str, folder_id):
     filename = f"Patient List {month_year_str}.xlsx"
-    query = f"name='{filename}' and trashed=false"
+    # مخصوص فولڈر میں تلاش کریں
+    query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
     results = service.files().list(q=query, fields="files(id, name)").execute()
     files = results.get("files", [])
     if files:
         return files[0]["id"]
     else:
-        file_metadata = {"name": filename, "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+        file_metadata = {
+            "name": filename,
+            "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "parents": [folder_id]  # فولڈر میں محفوظ کریں
+        }
         file = service.files().create(body=file_metadata, fields="id").execute()
         return file["id"]
 
@@ -176,8 +148,9 @@ def sync_drive_to_local(month_year_str):
     service = get_drive_service()
     if not service:
         return False
+    folder_id = get_or_create_drive_folder(service)
     filepath = LOCAL_DATA_DIR / f"Patient List {month_year_str}.xlsx"
-    file_id = find_or_create_drive_file(service, month_year_str)
+    file_id = find_or_create_drive_file(service, month_year_str, folder_id)
     if file_id:
         return download_from_drive(service, file_id, filepath)
     return False
@@ -189,7 +162,8 @@ def sync_local_to_drive(month_year_str):
     filepath = LOCAL_DATA_DIR / f"Patient List {month_year_str}.xlsx"
     if not filepath.exists():
         return False
-    file_id = find_or_create_drive_file(service, month_year_str)
+    folder_id = get_or_create_drive_folder(service)
+    file_id = find_or_create_drive_file(service, month_year_str, folder_id)
     if file_id:
         return upload_to_drive(service, file_id, filepath)
     return False
@@ -525,10 +499,11 @@ async def delete_file(month_year: str):
     service = get_drive_service()
     if service:
         try:
-            file_id = find_or_create_drive_file(service, month_year)
+            folder_id = get_or_create_drive_folder(service)
+            file_id = find_or_create_drive_file(service, month_year, folder_id)
             service.files().delete(fileId=file_id).execute()
-        except:
-            pass
+        except Exception as e:
+            print(f"❌ Failed to delete from Drive: {e}")
     return {"message": f"File {filepath.name} deleted successfully."}
 
 @app.get("/health")
@@ -538,7 +513,7 @@ async def health():
 # ============================================================
 # ON STARTUP: SYNC DRIVE
 # ============================================================
-@app.on_event("startup") 
+@app.on_event("startup")
 async def startup_event():
     print("🔄 Syncing files from Google Drive (OAuth)...")
     try:
@@ -546,7 +521,10 @@ async def startup_event():
         if not service:
             print("⚠️ Google Drive not available. Using local storage only.")
             return
-        query = "trashed=false"
+        # پہلے فولڈر کو یقینی بنائیں
+        folder_id = get_or_create_drive_folder(service)
+        # اب فولڈر کے اندر تمام فائلیں ڈھونڈیں
+        query = f"'{folder_id}' in parents and trashed=false"
         results = service.files().list(q=query, fields="files(id, name)").execute()
         files = results.get("files", [])
         for file in files:
@@ -560,5 +538,4 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️ Drive sync failed: {e}")
         print("⚠️ Continuing with local storage only.")
-
-    
+        

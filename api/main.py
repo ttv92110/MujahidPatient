@@ -8,20 +8,22 @@ import json
 import shutil
 import os
 import io
+import pickle
 from typing import Optional
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-# ====== GOOGLE DRIVE IMPORTS ======
-from google.oauth2 import service_account
+# ====== GOOGLE DRIVE OAuth IMPORTS ======
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request as GoogleAuthRequest  # <-- یہاں نام تبدیل کیا
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 
 # ====== BASE PATHS ======
 BASE_DIR = Path(__file__).parent.parent
 
-# Vercel پر /tmp استعمال کریں، ورنہ مقامی ڈائریکٹری
 if os.environ.get("VERCEL"):
     LOCAL_DATA_DIR = Path("/tmp/data")
 else:
@@ -29,106 +31,12 @@ else:
 
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
-CREDENTIALS_FILE = BASE_DIR / "credentials.json"  # Google Service Account JSON
+CLIENT_SECRETS_FILE = BASE_DIR / "api" / "client_secrets.json"
+TOKEN_FILE = BASE_DIR / "token.pickle"
 
 LOCAL_DATA_DIR.mkdir(exist_ok=True)
 TEMPLATES_DIR.mkdir(exist_ok=True)
 STATIC_DIR.mkdir(exist_ok=True)
-
-# ====== GOOGLE DRIVE SETUP ======
-# Drive folder ID where files will be stored (create a folder in Drive and get its ID)
-# If empty, files will be saved in root of "My Drive"
-DRIVE_FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID", "")  # Set this in Vercel Environment Variables
-
-def get_drive_service():
-    """Google Drive API service object"""
-    if not CREDENTIALS_FILE.exists():
-        print("⚠️ credentials.json not found. Google Drive disabled.")
-        return None
-    try:
-        creds = service_account.Credentials.from_service_account_file(
-            str(CREDENTIALS_FILE),
-            scopes=["https://www.googleapis.com/auth/drive.file"]
-        )
-        return build("drive", "v3", credentials=creds)
-    except Exception as e:
-        print(f"❌ Error initializing Google Drive: {e}")
-        return None
-
-def find_or_create_drive_file(service, month_year_str):
-    """Find existing file in Drive or create a new one"""
-    filename = f"Patient List {month_year_str}.xlsx"
-    query = f"name='{filename}' and trashed=false"
-    if DRIVE_FOLDER_ID:
-        query += f" and '{DRIVE_FOLDER_ID}' in parents"
-    results = service.files().list(q=query, fields="files(id, name)").execute()
-    files = results.get("files", [])
-    if files:
-        return files[0]["id"]
-    else:
-        # Create new file
-        file_metadata = {
-            "name": filename,
-            "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        }
-        if DRIVE_FOLDER_ID:
-            file_metadata["parents"] = [DRIVE_FOLDER_ID]
-        file = service.files().create(body=file_metadata, fields="id").execute()
-        return file["id"]
-
-def upload_to_drive(service, file_id, filepath):
-    """Upload/overwrite file to Drive"""
-    try:
-        media = MediaIoBaseUpload(
-            io.BytesIO(filepath.read_bytes()),
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            resumable=True
-        )
-        service.files().update(fileId=file_id, media_body=media).execute()
-        return True
-    except Exception as e:
-        print(f"❌ Upload failed: {e}")
-        return False
-
-def download_from_drive(service, file_id, filepath):
-    """Download file from Drive to local"""
-    try:
-        request = service.files().get_media(fileId=file_id)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-        filepath.write_bytes(fh.getvalue())
-        return True
-    except Exception as e:
-        print(f"❌ Download failed: {e}")
-        return False
-
-def sync_drive_to_local(month_year_str):
-    """Synchronize: if local file missing or older, download from Drive"""
-    service = get_drive_service()
-    if not service:
-        return False
-    filepath = LOCAL_DATA_DIR / f"Patient List {month_year_str}.xlsx"
-    file_id = find_or_create_drive_file(service, month_year_str)
-    # Always download the latest from Drive
-    if file_id:
-        return download_from_drive(service, file_id, filepath)
-    return False
-
-def sync_local_to_drive(month_year_str):
-    """Upload local file to Drive (overwrite)"""
-    service = get_drive_service()
-    if not service:
-        return False
-    filepath = LOCAL_DATA_DIR / f"Patient List {month_year_str}.xlsx"
-    if not filepath.exists():
-        return False
-    file_id = find_or_create_drive_file(service, month_year_str)
-    if file_id:
-        return upload_to_drive(service, file_id, filepath)
-    return False
 
 # ====== APP ======
 app = FastAPI(title="Patient Data Entry")
@@ -138,16 +46,37 @@ if STATIC_DIR.exists():
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-# ====== ڈیفالٹ INDEX.HTML ======
-INDEX_HTML = TEMPLATES_DIR / "index.html"
-if not INDEX_HTML.exists():
-    default_html = """<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"><title>Patient Entry</title></head>
-<body><h2>Setup complete. Please restart the server.</h2></body>
-</html>"""
-    INDEX_HTML.write_text(default_html, encoding="utf-8")
-    print(f"✅ Default index.html created at {INDEX_HTML}")
+# ============================================================
+# GOOGLE DRIVE AUTH (OAuth 2.0)
+# ============================================================
+SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+
+def get_drive_service():
+    """Get authenticated Drive service using OAuth 2.0"""
+    creds = None
+    if TOKEN_FILE.exists():
+        with open(TOKEN_FILE, "rb") as token:
+            creds = pickle.load(token)
+    
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(GoogleAuthRequest())
+        else:
+            if not CLIENT_SECRETS_FILE.exists():
+                print("❌ client_secrets.json not found. Please download OAuth client credentials.")
+                return None
+            try:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    str(CLIENT_SECRETS_FILE), SCOPES)
+                # Use port 8080 to match redirect URI
+                creds = flow.run_local_server(port=8080, open_browser=True)
+            except Exception as e:
+                print(f"❌ OAuth flow failed: {e}")
+                return None
+        with open(TOKEN_FILE, "wb") as token:
+            pickle.dump(creds, token)
+    
+    return build("drive", "v3", credentials=creds)
 
 # ============================================================
 # HELPER: Capitalize Words
@@ -167,7 +96,7 @@ def capitalize_words(text: str) -> str:
         return ' '.join(word.capitalize() for word in text.split())
 
 # ============================================================
-# SUGGESTIONS (میموری میں)
+# SUGGESTIONS
 # ============================================================
 def build_suggestions():
     names = set()
@@ -202,53 +131,71 @@ def get_suggestions():
     return suggestions_cache
 
 # ============================================================
-# HELPER FUNCTIONS
+# DRIVE SYNC FUNCTIONS (OAuth)
 # ============================================================
-def get_month_year_from_date(date_str):
-    dt = datetime.strptime(date_str, "%Y-%m-%d")
-    return f"{dt.strftime('%B')} {dt.year}"
+def find_or_create_drive_file(service, month_year_str):
+    filename = f"Patient List {month_year_str}.xlsx"
+    query = f"name='{filename}' and trashed=false"
+    results = service.files().list(q=query, fields="files(id, name)").execute()
+    files = results.get("files", [])
+    if files:
+        return files[0]["id"]
+    else:
+        file_metadata = {"name": filename, "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+        file = service.files().create(body=file_metadata, fields="id").execute()
+        return file["id"]
 
-def get_month_year_with_hyphen(month_year_str):
-    parts = month_year_str.split()
-    if len(parts) == 2:
-        return f"{parts[0]}- {parts[1]}"
-    return month_year_str
-
-def get_filename(month_year_str):
-    return f"Patient List {month_year_str}.xlsx"
-
-def get_filepath(month_year_str):
-    return LOCAL_DATA_DIR / get_filename(month_year_str)
-
-def parse_date_dmy(date_str):
+def upload_to_drive(service, file_id, filepath):
     try:
-        return datetime.strptime(date_str, "%d/%m/%Y")
-    except:
-        return datetime.min
+        media = MediaIoBaseUpload(
+            io.BytesIO(filepath.read_bytes()),
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resumable=True
+        )
+        service.files().update(fileId=file_id, media_body=media).execute()
+        return True
+    except Exception as e:
+        print(f"❌ Upload failed: {e}")
+        return False
 
-def format_date_dmy(date_str):
+def download_from_drive(service, file_id, filepath):
     try:
-        dt = datetime.strptime(date_str, "%Y-%m-%d")
-        return dt.strftime("%d/%m/%Y")
-    except:
-        return date_str
+        request = service.files().get_media(fileId=file_id)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        filepath.write_bytes(fh.getvalue())
+        return True
+    except Exception as e:
+        print(f"❌ Download failed: {e}")
+        return False
 
-def get_last_sr_no(month_year_str):
-    filepath = get_filepath(month_year_str)
-    if filepath.exists():
-        wb = load_workbook(filepath)
-        ws = wb.active
-        max_row = ws.max_row
-        if max_row >= 6:
-            last_row = ws[max_row]
-            sr_no = last_row[0].value
-            if sr_no and isinstance(sr_no, int):
-                return sr_no
-        return 0
-    return 0
+def sync_drive_to_local(month_year_str):
+    service = get_drive_service()
+    if not service:
+        return False
+    filepath = LOCAL_DATA_DIR / f"Patient List {month_year_str}.xlsx"
+    file_id = find_or_create_drive_file(service, month_year_str)
+    if file_id:
+        return download_from_drive(service, file_id, filepath)
+    return False
+
+def sync_local_to_drive(month_year_str):
+    service = get_drive_service()
+    if not service:
+        return False
+    filepath = LOCAL_DATA_DIR / f"Patient List {month_year_str}.xlsx"
+    if not filepath.exists():
+        return False
+    file_id = find_or_create_drive_file(service, month_year_str)
+    if file_id:
+        return upload_to_drive(service, file_id, filepath)
+    return False
 
 # ============================================================
-# EXCEL STYLING AND FILE CREATION
+# EXCEL STYLING & FILE OPERATIONS
 # ============================================================
 def style_excel(filepath):
     wb = load_workbook(filepath)
@@ -278,7 +225,7 @@ def style_excel(filepath):
     wb.save(filepath)
 
 def create_new_month_file(month_year_str):
-    filepath = get_filepath(month_year_str)
+    filepath = LOCAL_DATA_DIR / f"Patient List {month_year_str}.xlsx"
     wb = Workbook()
     ws = wb.active
     ws.merge_cells('A1:S4')
@@ -302,6 +249,9 @@ def create_new_month_file(month_year_str):
     style_excel(filepath)
     return filepath
 
+def get_filepath(month_year_str):
+    return LOCAL_DATA_DIR / f"Patient List {month_year_str}.xlsx"
+
 def append_row_to_excel(month_year_str, row_data):
     filepath = get_filepath(month_year_str)
     if not filepath.exists():
@@ -313,7 +263,6 @@ def append_row_to_excel(month_year_str, row_data):
         ws.cell(row=next_row, column=col_idx, value=value)
     wb.save(filepath)
     style_excel(filepath)
-    # Sync to Drive
     sync_local_to_drive(month_year_str)
 
 def update_row_in_excel(month_year_str, sr_no, row_data):
@@ -358,7 +307,6 @@ def delete_row_from_excel(month_year_str, sr_no):
 def get_all_rows(month_year_str):
     filepath = get_filepath(month_year_str)
     if not filepath.exists():
-        # Try to download from Drive
         sync_drive_to_local(month_year_str)
         if not filepath.exists():
             return []
@@ -371,31 +319,48 @@ def get_all_rows(month_year_str):
     return rows
 
 # ============================================================
+# OTHER HELPER FUNCTIONS
+# ============================================================
+def get_month_year_from_date(date_str):
+    dt = datetime.strptime(date_str, "%Y-%m-%d")
+    return f"{dt.strftime('%B')} {dt.year}"
+
+def get_month_year_with_hyphen(month_year_str):
+    parts = month_year_str.split()
+    if len(parts) == 2:
+        return f"{parts[0]}- {parts[1]}"
+    return month_year_str
+
+def parse_date_dmy(date_str):
+    try:
+        return datetime.strptime(date_str, "%d/%m/%Y")
+    except Exception:
+        return datetime.min
+
+def format_date_dmy(date_str):
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        return dt.strftime("%d/%m/%Y")
+    except Exception:
+        return date_str
+
+def get_last_sr_no(month_year_str):
+    filepath = get_filepath(month_year_str)
+    if filepath.exists():
+        wb = load_workbook(filepath)
+        ws = wb.active
+        max_row = ws.max_row
+        if max_row >= 6:
+            last_row = ws[max_row]
+            sr_no = last_row[0].value
+            if sr_no and isinstance(sr_no, int):
+                return sr_no
+        return 0
+    return 0
+
+# ============================================================
 # ENDPOINTS
 # ============================================================
-
-@app.on_event("startup")
-async def startup_event():
-    """Startup par Drive سے تمام فائلیں sync کر لیں"""
-    print("🔄 Syncing files from Google Drive...")
-    service = get_drive_service()
-    if not service:
-        print("⚠️ Google Drive not available. Using local storage only.")
-        return
-    # Get list of all files in Drive folder
-    query = "trashed=false"
-    if DRIVE_FOLDER_ID:
-        query += f" and '{DRIVE_FOLDER_ID}' in parents"
-    results = service.files().list(q=query, fields="files(id, name)").execute()
-    files = results.get("files", [])
-    for file in files:
-        if file["name"].startswith("Patient List ") and file["name"].endswith(".xlsx"):
-            month_year = file["name"].replace("Patient List ", "").replace(".xlsx", "")
-            local_path = get_filepath(month_year)
-            if not local_path.exists():
-                download_from_drive(service, file["id"], local_path)
-                print(f"✅ Downloaded {file['name']} from Drive")
-    print("✅ Sync complete.")
 
 @app.get("/")
 async def home(request: Request, date: Optional[str] = Query(None)):
@@ -493,7 +458,6 @@ async def delete_row(month_year: str = Form(...), sr_no: int = Form(...)):
 async def download_file(month_year: str):
     filepath = get_filepath(month_year)
     if not filepath.exists():
-        # Try to download from Drive
         sync_drive_to_local(month_year)
         if not filepath.exists():
             return JSONResponse({"error": f"File {filepath.name} not found."}, status_code=404)
@@ -558,14 +522,43 @@ async def delete_file(month_year: str):
     backup = filepath.with_suffix(".backup.xlsx")
     if backup.exists():
         backup.unlink()
-    # Delete from Drive also
     service = get_drive_service()
     if service:
-        file_id = find_or_create_drive_file(service, month_year)
-        if file_id:
+        try:
+            file_id = find_or_create_drive_file(service, month_year)
             service.files().delete(fileId=file_id).execute()
+        except:
+            pass
     return {"message": f"File {filepath.name} deleted successfully."}
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+# ============================================================
+# ON STARTUP: SYNC DRIVE
+# ============================================================
+@app.on_event("startup") 
+async def startup_event():
+    print("🔄 Syncing files from Google Drive (OAuth)...")
+    try:
+        service = get_drive_service()
+        if not service:
+            print("⚠️ Google Drive not available. Using local storage only.")
+            return
+        query = "trashed=false"
+        results = service.files().list(q=query, fields="files(id, name)").execute()
+        files = results.get("files", [])
+        for file in files:
+            if file["name"].startswith("Patient List ") and file["name"].endswith(".xlsx"):
+                month_year = file["name"].replace("Patient List ", "").replace(".xlsx", "")
+                local_path = LOCAL_DATA_DIR / file["name"]
+                if not local_path.exists():
+                    download_from_drive(service, file["id"], local_path)
+                    print(f"✅ Downloaded {file['name']} from Drive")
+        print("✅ Sync complete.")
+    except Exception as e:
+        print(f"⚠️ Drive sync failed: {e}")
+        print("⚠️ Continuing with local storage only.")
+
+    
